@@ -5,7 +5,7 @@
 단국대학교 소프트웨어학과 졸업작품 · 32231798 박유찬
 Game-Education for EZ way
 
-[웹앱](https://geez-quest.geez-monster-quest.workers.dev/) · [시연 영상 안내](https://app.notion.com/p/Game-Education-for-EZ-41aefd12f0f080e69868e26b9e5a2c0d?source=copy_link) · [YouTube 시연 영상](https://youtu.be/5kmh_milovc) · [결과보고서 PDF](output/GEEZ_Project_Report.pdf) · [포스터 PDF](output/GEEZ_Poster.pdf)
+[웹앱](https://geez-quest.geez-monster-quest.workers.dev/) · [시연 영상](https://app.notion.com/p/Game-Education-for-EZ-41aefd12f0f080e69868e26b9e5a2c0d?source=copy_link) · [결과보고서 PDF](output/GEEZ_Project_Report.pdf) · [포스터 PDF](output/GEEZ_Poster.pdf)
 
 ## 기획 배경
 
