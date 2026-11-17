@@ -1,0 +1,20 @@
+# 로컬 실행 데이터와 자격 증명
+/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+*.pem
+
+# 다시 생성할 수 있는 의존성, 빌드 결과와 캐시
+node_modules/
+.wrangler/
+.venv/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+Thumbs.db

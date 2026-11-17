@@ -6,17 +6,17 @@ const dialog = $("#popup");
 const body = $("#dialog-body");
 const model = {
   online: false,
+  builtin: [],
+  catalogError: "",
   user: null,
   shared: [],
   attempts: []
 };
 const esc = value => String(value).replace(
-    /[&<>"']/g,
-    c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+    /[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
 const uid = () =>
-    Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2, "0"))
-        .join("");
-// 같은 브라우저에서도 게스트와 각 회원의 보관함·연습 기록을 따로 저장한다.
+    Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2, "0")).join("");
+// 게스트와 회원별로 보관함·연습 기록 분리
 function localPrefix(type) {
   return "geez.git.v1." + (model.user?.id || "guest") + "." + type + ".";
 }
@@ -33,7 +33,7 @@ function saveLocal(type, id, record) {
 }
 
 const drafts = () => localRows("draft").sort((a, b) => b.created - a.created);
-const catalog = () => [...GEEZ.catalog, ...model.shared];
+const catalog = () => [...model.builtin, ...model.shared];
 const entries = () => [...drafts(), ...catalog()];
 const findEntry = id => entries().find(entry => entry.id === id);
 const imagePath = item => "art/m" + Number(item.art) + ".webp";
@@ -48,7 +48,8 @@ function notify(text) {
   }, 3500);
 }
 
-function popup(title, html) {
+function popup(title, html, result = "") {
+  dialog.dataset.result = result;
   $("#dialog-title").textContent = title;
   $("#error").textContent = "";
   body.innerHTML = html;
@@ -74,12 +75,12 @@ function handle(fn) {
 
 $("#close").onclick = () => dialog.close();
 dialog.addEventListener("close", () => clearInterval(clock));
-async function api(route, data) {
+async function api(route, data, signal) {
   const result = await fetch("./api/" + route, {
     method: data ? "POST" : "GET",
     cache: "no-store",
-    ...(data ? {headers: {"Content-Type": "application/json"}, body: JSON.stringify(data)} :
-               {})
+    signal,
+    ...(data ? {headers: {"Content-Type": "application/json"}, body: JSON.stringify(data)} : {})
   });
   const response = await result.json();
   if (!result.ok) {
@@ -120,10 +121,16 @@ function cards(list, empty = "아직 저장한 항목이 없어요.") {
 }
 
 function home() {
-  // 한국 시간 자정에 오늘의 몬스터를 바꾼다.
+  // 한국 시간 자정을 기준으로 오늘의 몬스터 선택
   const hourMs = 60 * 60 * 1000;
   const day = Math.floor((Date.now() + 9 * hourMs) / (24 * hourMs));
-  const daily = GEEZ.catalog[day % 100];
+  const monsters = model.builtin.filter(entry => entry.pack.kind === "monster");
+  if (!monsters.length) {
+    main.innerHTML = `<h1>탐험 홈</h1><p role="status">${esc(model.catalogError || "기본 문항을 불러오는 중이에요.")}</p>
+      <a class="button secondary" href="#studio">내 보관함</a>`;
+    return;
+  }
+  const daily = monsters[day % monsters.length];
   main.innerHTML = `
     <div class="hero">
       <div>
@@ -142,11 +149,11 @@ function home() {
         <h2>분야별 던전</h2>
         <a href="#studio">던전 만들기 →</a>
       </div>
-      ${cards(GEEZ.catalog.filter(e => e.pack.kind === "dungeon"))}
+      ${cards(model.builtin.filter(e => e.pack.kind === "dungeon"))}
     </section>
     <section>
       <h2>추천 몬스터</h2>
-      ${cards(GEEZ.catalog.slice(0, 4))}
+      ${cards(model.builtin.slice(0, 4))}
     </section>`;
 }
 
@@ -167,21 +174,74 @@ function explore() {
         ${tags.map(t => '<option>' + esc(t) + '</option>').join("")}
       </select>
     </div>
-    <p id="count"></p>
-    <div id="results"></div>`;
+    ${model.catalogError ? '<p role="status">' + esc(model.catalogError) + '</p>' : ""}
+    <p id="count" role="status"></p>
+    <div id="results"></div>
+    <div id="related" aria-live="polite"></div>`;
+  const related = $("#related");
+  let delay;
+  let pending;
+
+  async function showRelated(question, kind, tag, signal) {
+    if (!related.isConnected || signal.aborted) return;
+    related.textContent = "비슷한 문항을 찾는 중이에요.";
+    try {
+      const {matches} = await api("similar", {scope: "explore", question, kind, tag}, signal);
+      if (signal.aborted || !related.isConnected) return;
+      const rows = matches.flatMap(match => {
+        const entry = listById.get(match.id);
+        if (!entry) return [];
+        const label = entry.pack.kind === "dungeon" ? "던전" : "몬스터";
+        return [`<button class="related-hit" data-open="${esc(entry.id)}">
+          <strong>${esc(match.question)}</strong>
+          <small>${label} · ${esc(entry.pack.name)} · 표현 유사도 ${
+            Math.round(match.score * 100)}%</small>
+        </button>`];
+      });
+      related.innerHTML = rows.length ?
+          '<section><h2>비슷한 문항</h2><div class="stack">' + rows.join("") + '</div></section>' :
+          '<p class="muted">비슷한 문항이 없어요.</p>';
+    } catch {
+      if (!signal.aborted && related.isConnected)
+        related.textContent = "비슷한 문항을 불러오지 못했어요.";
+    }
+  }
+
+  const listById = new Map(list.map(entry => [entry.id, entry]));
+  let visibleCount;
   function search() {
-    const query = $("#query").value.trim().toLowerCase();
+    visibleCount = 36;
+    clearTimeout(delay);
+    pending?.abort();
+    related.replaceChildren();
+    const query = $("#query").value.trim();
     const selectedTag = $("#tag").value;
     const selectedKind = $("#kind").value;
-    const results = list.filter(({ pack }) => {
-      if (selectedKind && selectedKind !== pack.kind) return false;
-      if (selectedTag && !pack.items.some(item => item.tags.includes(selectedTag))) return false;
-
-      const fields = [pack.name, pack.tag, ...pack.items.flatMap(item => [item.question, ...item.tags])];
-      return fields.some(value => value.toLowerCase().includes(query));
-    });
-    $("#count").textContent = "검색 결과 " + results.length + "개";
-    $("#results").innerHTML = cards(results, "조건에 맞는 문제가 없어요.");
+    const results = list.filter(
+        ({pack}) =>
+            GEEZ.matchesFilters(pack, selectedKind, selectedTag) && GEEZ.matchesQuery(pack, query));
+    $("#count").textContent = (query ? "검색 문구 일치 " : "검색 결과 ") + results.length + "개";
+    function displayPage() {
+      $("#results").innerHTML = results.length || !query ?
+          cards(results.slice(0, visibleCount), "조건에 맞는 문제가 없어요.") :
+          "";
+      if (visibleCount < results.length) {
+        const more = document.createElement("button");
+        more.className = "quiet more";
+        more.textContent = "더 보기 (" + visibleCount + "/" + results.length + ")";
+        more.onclick = () => {
+          visibleCount += 36;
+          displayPage();
+        };
+        $("#results").append(more);
+      }
+    }
+    displayPage();
+    if (model.online && query.length >= 2 && query.length <= 600) {
+      pending = new AbortController();
+      const {signal} = pending;
+      delay = setTimeout(() => showRelated(query, selectedKind, selectedTag, signal), 350);
+    }
   }
   for (const i of ["#query", "#tag", "#kind"]) {
     $(i).oninput = search;
@@ -199,13 +259,19 @@ function stats() {
   const titles = rows => rows.length ?
       rows.map(r => '<li>' + esc(r.item.name) + ' · ' + r.tries + '회 도전</li>').join("") :
       '<li>도전 기록이 없어요.</li>';
-  const recordSource = model.user
-    ? esc(model.user.nickname) + "의 회원 기록과 이 브라우저의 보관함 연습 기록"
-    : "이 브라우저에 저장된 게스트 기록";
-  const tagRows = [...summary.tags].map(([tag, record]) => `
+  const recordSource = model.user ?
+      esc(model.user.nickname) + "의 회원 기록과 이 브라우저의 보관함 연습 기록" :
+      "이 브라우저에 저장된 게스트 기록";
+  const review = GEEZ.reviewDungeon(summary, entries());
+  const missed = review?.rounds.filter(row => row.previousMiss).length || 0;
+  const reviewDescription = review ?
+      `#${esc(review.pack.tag)} · 이전 오답 ${missed}문제 · 새 문제 ${review.rounds.length - missed}개` :
+      "한 태그에서 서로 다른 문제를 3개 이상 풀면, 첫 도전 오답이 있는 분야로 복습 던전을 만들어요.";
+  const tagRows = [...summary.tags]
+                      .map(([tag, record]) => `
     <tr>
       <td>${esc(tag)}</td>
-      <td>${record.right} / ${record.total}</td>
+      <td>${record.right} / ${record.total} (${Math.round(record.right / record.total * 100)}%)</td>
       <td>${record.caught}마리</td>
     </tr>`).join("");
 
@@ -219,11 +285,19 @@ function stats() {
       ${metric("첫 도전 정답률", rate)}
     </section>
     <section>
-      <h2>태그별 학습 기록</h2>
+      <h2>내 태그별 학습 기록</h2>
+      ${tagChart(Object.fromEntries([...summary.tags].map(([tag, row]) => [tag, row.right])))}
       <table>
         <thead><tr><th>태그</th><th>첫 도전 정답</th><th>포획</th></tr></thead>
-        <tbody>${tagRows}</tbody>
+        <tbody>${
+      tagRows || '<tr><td colspan="3">첫 문제를 풀면 여기에 내 기록이 쌓여요.</td></tr>'}</tbody>
       </table>
+    </section>
+    <section class="panel"><h2>전체 사용자 통계</h2><div id="community">불러오는 중…</div></section>
+    <section class="panel">
+      <h2>맞춤 복습 던전</h2>
+      <p>${reviewDescription}</p>
+      ${review ? '<button id="review">복습 던전 시작</button>' : ""}
     </section>
     <section class="panel">
       <h2>포획 도감</h2>
@@ -233,6 +307,8 @@ function stats() {
       <h2>첫 도전 오답 도감</h2>
       <ul class="compact">${titles(summary.records.filter(r => !r.first))}</ul>
     </section>`;
+  showCommunity();
+  if (review) $("#review").onclick = handle(() => play(review, 0, 0));
 }
 
 function detail(entry) {
@@ -240,24 +316,26 @@ function detail(entry) {
     throw Error("현재 기기 또는 서버에서 해당 도전을 찾을 수 없어요.");
   }
   const pack = entry.pack;
-  const overview = pack.kind === "dungeon"
-    ? `<ol>${pack.items.map(item => `<li>${esc(item.name)}</li>`).join("")}</ol>`
-    : `<p>난이도 ${GEEZ.difficulty(pack.items[0].art)} · 첫 포획 ${GEEZ.xpFor(pack.items[0].art)} XP</p>`;
+  const overview = pack.kind === "dungeon" ?
+      `<ol>${pack.items.map(item => `<li>${esc(item.name)}</li>`).join("")}</ol>` :
+      `<p>난이도 ${GEEZ.difficulty(pack.items[0].art)} · 첫 포획 ${GEEZ.xpFor(pack.items[0].art)} XP</p>`;
   const canPublish = entry.local && !entry.received && model.user;
 
   popup(pack.name, `
     <img class="question-art" src="${art(pack)}" alt="">
     <p>${esc(entry.author)} · #${esc(pack.tag)}</p>
     ${overview}
+    ${pack.kind === "monster" ? '<div id="question-stats"></div>' : ""}
     <div class="actions">
       <button id="start">도전 시작</button>
-      <button class="quiet" id="export">JSON 내보내기</button>
       ${location.protocol !== "file:" ? '<button class="quiet" id="share">링크 복사</button>' : ""}
       ${entry.received ? '<button class="quiet" id="keep">내 보관함에 저장</button>' : ""}
       ${canPublish ? '<button class="quiet" id="publish">공용 목록에 등록</button>' : ""}
+      ${(entry.local && !entry.received) || entry.ownDraftId ? '<button class="quiet danger" id="remove-pack">삭제</button>' : ""}
     </div>`);
+  if (pack.kind === "monster") showQuestionStats({id: entry.id, index: 0, local: entry.local});
   $("#start").onclick = handle(() => play(entry, 0, 0));
-  $("#export").onclick = () => exportPack(pack);
+  if ($("#remove-pack")) $("#remove-pack").onclick = () => confirmPackRemoval(entry, $("#draft-search")?.value);
   if ($("#share")) {
     $("#share").onclick = handle(() => copyLink(entry));
   }
@@ -281,11 +359,11 @@ function detail(entry) {
 
 async function copyLink(entry) {
   const url = new URL(location.href);
-  // 보관함 문제는 링크에 내용까지 담고, 공용 문제는 목록의 ID로 찾아간다.
-  url.hash = entry.local ? "share=" + encodeURIComponent(JSON.stringify(entry.pack)) :
-                           "quest/" + entry.id;
+  // 보관함 작품은 내용으로, 공용 작품은 공개 ID로 공유
+  url.hash =
+      entry.local ? "share=" + encodeURIComponent(JSON.stringify(entry.pack)) : "quest/" + entry.id;
   if (url.href.length > 32000) {
-    throw Error("이 던전은 링크가 길어져요. JSON 내보내기로 공유해 주세요.");
+    throw Error("이 던전은 링크가 길어져요. 로그인 후 공용 목록에 등록해 짧은 링크를 복사해 주세요.");
   }
   if (navigator.clipboard?.writeText) {
     try {
@@ -300,20 +378,23 @@ async function copyLink(entry) {
   $("#link").select();
 }
 
-async function play(entry, index, points) {
+async function play(entry, index, points, recovered = 0) {
   clearInterval(clock);
   const pack = entry.pack;
   const item = pack.items[index];
-  // 로그인한 회원이 공용 문제를 풀면 서버가 채점한다. 보관함 문제는 브라우저에서 채점한다.
-  const remote = Boolean(model.user && !entry.local);
-  const round = remote ? await api("start", {id: entry.id, index}) :
+  // 회원의 공개 도전은 서버에서, 개인 연습은 브라우저에서 채점
+  const source = entry.rounds?.[index] || {local: entry.local, id: entry.id, index};
+  const remote = Boolean(model.user && !source.local);
+  const round = remote ? await api("start", {id: source.id, index: source.index}) :
                          {deadline: item.seconds ? Date.now() + item.seconds * 1000 : 0};
-  const answerField = item.choices.length
-    ? item.choices.map(choice => `
+  const answerField = item.choices.length ?
+      item.choices
+          .map(choice => `
         <label class="choice">
           <input type="radio" name="answer" value="${esc(choice)}" required>${esc(choice)}
-        </label>`).join("")
-    : '<label>내 답<input name="answer" autocomplete="off" maxlength="100" required></label>';
+        </label>`)
+          .join("") :
+      '<label>내 답<input name="answer" autocomplete="off" maxlength="100" required></label>';
 
   popup(item.name, `
     <p class="muted">${index + 1} / ${pack.items.length} · #${esc(pack.tag)} <span id="timer"></span></p>
@@ -322,8 +403,9 @@ async function play(entry, index, points) {
     <form id="answer">
       ${answerField}
       <button>답안 제출</button>
-    </form>`);
-  // 제출 버튼과 제한 시간 타이머가 동시에 채점을 요청할 수 있다.
+    </form><div id="question-stats"></div>`);
+  showQuestionStats(source);
+  // 제출 버튼과 제한 시간 만료의 중복 채점 방지
   let busy = false;
   async function submit() {
     if (busy) {
@@ -348,25 +430,34 @@ async function play(entry, index, points) {
       }
       clearInterval(clock);
       const score = points + Number(correct);
-      const title = expired ? "시간이 끝났어요" : correct ? "몬스터 포획 성공" : "다음 도전에 다시 만나요";
+      const recoveredTotal = recovered + Number(Boolean(source.previousMiss && correct));
+      const title = correct ? "몬스터 포획 성공!" : "몬스터 포획 실패...";
       const nextLabel = index + 1 < pack.items.length ? "다음 몬스터" : "결과 보기";
-      popup(title, `
+      popup(
+          title, `
+        ${expired ? "<p>제한 시간이 끝났어요.</p>" : ""}
         <img class="question-art" src="${imagePath(item)}" alt="">
         <p><b>정답</b> ${esc(item.answers.join(", "))}</p>
         <p>${esc(item.explain)}</p>
+        <div id="question-stats"></div>
         <div class="actions">
           <button id="next">${nextLabel}</button>
-          <button class="quiet" id="retry">같은 문제 다시 풀기</button>
-        </div>`);
-      $("#retry").onclick = handle(() => play(entry, index, points));
+          ${entry.rounds ? "" : '<button class="quiet" id="retry">같은 문제 다시 풀기</button>'}
+        </div>`,
+          correct ? "success" : "failure");
+      showQuestionStats(source);
+      if ($("#retry")) $("#retry").onclick = handle(() => play(entry, index, points));
       $("#next").onclick = handle(() => {
         if (index + 1 < pack.items.length) {
-          return play(entry, index + 1, score);
+          return play(entry, index + 1, score, recoveredTotal);
         }
+        const previousMisses = entry.rounds?.filter(row => row.previousMiss).length;
+        const reviewResult =
+            previousMisses ? `<p>이전 오답 ${previousMisses}문제 중 ${recoveredTotal}문제 정답</p>` : "";
         popup(
-            "탐험 완료",
-            '<p>' + esc(pack.name) + ' · ' + pack.items.length + '문제 중 ' + score +
-                '문제 정답</p><button id="seeStats">상태창 보기</button>');
+            entry.rounds ? "복습 완료" : "탐험 완료",
+            '<p>' + esc(pack.name) + ' · ' + pack.items.length + '문제 중 ' + score + '문제 정답</p>' +
+                reviewResult + '<button id="seeStats">상태창 보기</button>');
         $("#seeStats").onclick = () => {
           dialog.close();
           location.hash = "stats";
@@ -395,7 +486,9 @@ async function play(entry, index, points) {
 
 function account(signup = false) {
   if (model.user) {
-    popup(model.user.nickname, '<button id="logout">로그아웃</button>');
+    popup(model.user.nickname, `<div class="actions"><button id="logout">로그아웃</button>
+      <button id="withdraw" class="quiet danger">회원 탈퇴</button></div>`);
+    $("#withdraw").onclick = withdrawalForm;
     $("#logout").onclick = handle(async () => {
       await api("logout", {});
       await sync();
@@ -404,9 +497,8 @@ function account(signup = false) {
     });
     return;
   }
-  const nicknameField = signup
-    ? '<label>닉네임<input name="nickname" maxlength="16" required></label>'
-    : "";
+  const nicknameField =
+      signup ? '<label>닉네임<input name="nickname" maxlength="16" required></label>' : "";
   popup(signup ? "회원가입" : "로그인", `
     <form id="auth">
       <label>아이디
@@ -427,6 +519,38 @@ function account(signup = false) {
     await sync();
     dialog.close();
     render();
+  });
+}
+
+function withdrawalForm() {
+  const accountId = model.user.id;
+  const prefixes = [localPrefix("draft"), localPrefix("try")];
+  popup("회원 탈퇴", `<form id="withdraw-form">
+    <p>탈퇴하면 계정, 공개한 작품, 회원 풀이 기록과 이 브라우저의 내 보관함이 삭제돼요.
+       삭제한 데이터는 복구할 수 없어요.</p>
+    <label>현재 비밀번호<input type="password" name="password" autocomplete="current-password"
+      maxlength="128" required></label>
+    <div class="actions"><button type="button" class="quiet" id="cancel-withdraw">취소</button>
+      <button type="submit" class="danger">계정 삭제 및 탈퇴</button></div></form>`);
+  $("#cancel-withdraw").onclick = () => account();
+  $("#withdraw-form").onsubmit = handle(async event => {
+    const form = event.currentTarget;
+    const submit = form.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      await api("withdraw", {accountId, password: form.elements.password.value});
+      for (const key of Object.keys(localStorage)) {
+        if (prefixes.some(prefix => key.startsWith(prefix))) localStorage.removeItem(key);
+      }
+      model.user = null;
+      model.attempts = [];
+      model.shared = model.shared.filter(entry => !entry.ownDraftId);
+      location.hash = "home";
+      render();
+      notify("회원 탈퇴가 완료됐어요.");
+    } finally {
+      submit.disabled = false;
+    }
   });
 }
 
@@ -459,7 +583,7 @@ function render() {
     if (route.startsWith("share=")) {
       handle(() => {
         if (route.length > 32000) {
-          throw Error("공유 링크가 너무 길어요. JSON 파일로 받아 주세요.");
+          throw Error("공유 링크가 너무 길어요. 공용 목록에 등록한 짧은 링크를 받아 주세요.");
         }
         let pack;
         try {
@@ -481,11 +605,20 @@ main.addEventListener("click", event => {
 });
 window.addEventListener("hashchange", render);
 window.addEventListener("DOMContentLoaded", async () => {
-  if (["localhost", "127.0.0.1"].includes(location.hostname)) {
-    try {
-      await sync();
-    } catch {
-    }
+  if (["http:", "https:"].includes(location.protocol)) {
+    // 기본 목록은 최초 한 번만 조회하고 회원 기록은 제출·로그인 후 별도 갱신
+    await Promise.allSettled([
+      sync(),
+      api("catalog").then(({entries}) => {
+        if (!Array.isArray(entries)) throw Error("기본 목록 형식 오류");
+        model.builtin = entries;
+        if (!entries.length) model.catalogError = "등록된 기본 문항이 없어요.";
+      }).catch(() => {
+        model.catalogError = "기본 문항을 불러오지 못했어요. 서버 연결 후 새로고침해 주세요.";
+      })
+    ]);
+  } else {
+    model.catalogError = "기본 문항을 보려면 서버를 실행하고 웹 주소로 열어 주세요.";
   }
   render();
 });

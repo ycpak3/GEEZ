@@ -1,0 +1,21 @@
+{
+  "name": "geez-monster-quest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GEEZ 몬스터 탐험대",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node source/server.mjs",
+    "cloud:login": "wrangler login",
+    "db:list": "wrangler d1 list",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote",
+    "cloud:check": "wrangler deploy --dry-run --config source/search/wrangler.jsonc && wrangler deploy --dry-run --config wrangler.jsonc",
+    "cloud:deploy": "wrangler deploy --config source/search/wrangler.jsonc && wrangler deploy --config wrangler.jsonc"
+  },
+  "dependencies": {
+    "wrangler": "4.163.0"
+  }
+}

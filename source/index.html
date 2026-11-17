@@ -1,19 +1,40 @@
 <!doctype html>
 <html lang="ko">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>GEEZ · 몬스터 탐험대</title>
-  <link rel="icon" href="art/badge.svg"><link rel="stylesheet" href="style.css">
-  <script defer src="questions.js"></script><script defer src="rules.js"></script>
-  <script defer src="app.js"></script><script defer src="workshop.js"></script>
-</head>
-<body>
-<header><div class="bar"><a class="brand" href="#home"><img src="art/badge.svg" alt="">GEEZ</a>
-<nav aria-label="주 메뉴"><a href="#home">탐험 홈</a><a href="#explore">탐색</a><a href="#studio">내 보관함</a><a href="#stats">상태창</a></nav>
-<button class="quiet" id="account" hidden>로그인</button></div></header>
-<main id="main"></main>
-<div id="notice" role="status" aria-live="polite"></div>
-<dialog id="popup" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="close" aria-label="닫기">닫기</button></div><div id="dialog-body"></div><p id="error" role="alert"></p></dialog>
-<noscript>몬스터를 만들고 풀려면 브라우저에서 JavaScript를 켜 주세요.</noscript>
-</body></html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GEEZ · 몬스터 탐험대</title>
+    <link rel="icon" href="art/badge.svg">
+    <link rel="stylesheet" href="style.css">
+    <!-- 공통 규칙과 화면을 불러온 뒤 서버의 기본 문제 목록 조회 -->
+    <script defer src="rules.js"></script>
+    <script defer src="charts.js"></script>
+    <script defer src="app.js"></script>
+    <script defer src="workshop.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="bar">
+        <a class="brand" href="#home"><img src="art/badge.svg" alt="">GEEZ</a>
+        <nav aria-label="주 메뉴">
+          <a href="#home">탐험 홈</a>
+          <a href="#explore">탐색</a>
+          <a href="#studio">내 보관함</a>
+          <a href="#stats">상태창</a>
+        </nav>
+        <button class="quiet" id="account" hidden>로그인</button>
+      </div>
+    </header>
+    <main id="main"></main>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <dialog id="popup" aria-labelledby="dialog-title">
+      <div class="dialog-head">
+        <h2 id="dialog-title"></h2>
+        <button id="close" aria-label="닫기">닫기</button>
+      </div>
+      <div id="dialog-body"></div>
+      <p id="error" role="alert"></p>
+    </dialog>
+    <noscript>몬스터를 만들고 풀려면 브라우저에서 JavaScript를 켜 주세요.</noscript>
+  </body>
+</html>

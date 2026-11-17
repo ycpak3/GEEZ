@@ -1,0 +1,44 @@
+{
+  "name": "geez-quest",
+  "main": "source/cloud/worker.mjs",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "build": {
+    "command": "node source/cloud/build-assets.mjs"
+  },
+  "assets": {
+    "directory": ".wrangler/public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "services": [
+    {
+      "binding": "SIMILARITY",
+      "service": "geez-question-search"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "AUTH_LIMIT",
+      "namespace_id": "4311",
+      "simple": {
+        "limit": 40,
+        "period": 60
+      }
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "geez-db",
+      "database_id": "57f96c70-d3f7-4bc4-9cf7-fccc761f423a",
+      "migrations_dir": "source/db/migrations",
+      "migrations_table": "geez_schema_migrations"
+    }
+  ]
+}
