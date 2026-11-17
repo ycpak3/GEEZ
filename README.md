@@ -7,8 +7,6 @@ Game-Education for EZ way
 
 [시연 영상](https://app.notion.com/p/Game-Education-for-EZ-41aefd12f0f080e69868e26b9e5a2c0d?source=copy_link) · [포스터 PDF](output/GEEZ_Poster.pdf) · [결과보고서 PDF](output/GEEZ_Project_Report.pdf) · [소스 코드](source/)
 
-![탐험 홈에서 오늘의 몬스터를 선택하는 화면](output/screens/home.png)
-
 ## 기획 배경
 
 어려운 문제를 스스로 풀어냈을 때의 성취감은 다음 문제에 도전할 힘이 된다. 유튜브 쇼츠처럼 짧고 자극적인 콘텐츠가 익숙한 일상에서도, 내가 아는 것을 문제로 만들어 건네고 다른 사람이 그 답을 찾아가는 과정을 보며 지식을 나누는 즐거움을 느낄 수 있도록 GEEZ를 기획했다.
